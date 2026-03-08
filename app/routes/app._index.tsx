@@ -53,6 +53,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         };
       }
       const variables = (args.variables as Record<string, unknown>) ?? {};
+      if (/\$first\s*:\s*Int/i.test(query) && !variables.first) {
+        variables.first = 250;
+      }
       try {
         const response = await admin.graphql(query, { variables });
         const result = await response.json();

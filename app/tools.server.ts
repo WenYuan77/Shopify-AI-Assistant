@@ -117,9 +117,20 @@ export async function generateChart(args: {
 export async function generateExcel(args: {
   title: string;
   columns: Array<{ header: string; key: string; width?: number }>;
-  rows: Array<Record<string, unknown>>;
+  rows: unknown;
 }): Promise<{ result: unknown; attachment: Attachment }> {
-  const { title, columns, rows } = args;
+  const { title, columns } = args;
+
+  let rows: Array<Record<string, unknown>>;
+  if (Array.isArray(args.rows)) {
+    rows = args.rows;
+  } else if (args.rows && typeof args.rows === "object") {
+    rows = Object.values(args.rows as Record<string, unknown>).map((v) =>
+      typeof v === "object" && v !== null ? (v as Record<string, unknown>) : { value: v },
+    );
+  } else {
+    rows = [];
+  }
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "AI Report Assistant";
