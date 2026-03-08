@@ -8,6 +8,47 @@ type GqlFn = (
   o?: { variables?: Record<string, unknown> },
 ) => Promise<Response>;
 
+async function fetchAllNodes(
+  admin: { graphql: GqlFn },
+  query: string,
+  variables: Record<string, unknown>,
+  dataPath: string,
+): Promise<Array<Record<string, unknown>>> {
+  const allNodes: Array<Record<string, unknown>> = [];
+  let cursor: string | null = null;
+
+  do {
+    if (cursor) variables.after = cursor;
+    let resp: Response;
+    try {
+      resp = await admin.graphql(query, { variables });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Fetch] GraphQL threw:`, msg);
+      break;
+    }
+    const json = (await resp.json()) as Record<string, unknown>;
+    if (json.errors) {
+      console.error(`[Fetch] GraphQL errors:`, JSON.stringify(json.errors).slice(0, 300));
+    }
+    const nodes = extractRows(json, dataPath);
+    allNodes.push(...nodes);
+
+    const data = json.data as Record<string, unknown> | undefined;
+    const resource = data ? getNestedValue(data, dataPath) : undefined;
+    const pageInfo =
+      resource && typeof resource === "object"
+        ? ((resource as Record<string, unknown>).pageInfo as {
+            hasNextPage?: boolean;
+            endCursor?: string;
+          })
+        : undefined;
+    cursor = pageInfo?.hasNextPage ? (pageInfo.endCursor ?? null) : null;
+  } while (cursor);
+
+  return allNodes;
+}
+
 function safeFilename(t: string): string {
   return t.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_").slice(0, 60);
 }
@@ -97,30 +138,14 @@ export async function exportToExcel(
   const variables = args.variables ?? {};
   if (/\$first/i.test(query) && !variables.first) variables.first = 250;
 
-  const allNodes: Array<Record<string, unknown>> = [];
-  let cursor: string | null = null;
+  console.log(`[Export Excel] query:`, query.slice(0, 300));
+  console.log(`[Export Excel] vars:`, JSON.stringify(variables));
+  console.log(`[Export Excel] filters:`, JSON.stringify(args.rowFilters ?? []));
 
-  do {
-    if (cursor) variables.after = cursor;
-    const resp = await admin.graphql(query, { variables });
-    const json = (await resp.json()) as Record<string, unknown>;
-    const nodes = extractRows(json, dataPath);
-    allNodes.push(...nodes);
-
-    const data = json.data as Record<string, unknown> | undefined;
-    const resource = data ? getNestedValue(data, dataPath) : undefined;
-    const pageInfo =
-      resource && typeof resource === "object"
-        ? ((resource as Record<string, unknown>).pageInfo as {
-            hasNextPage?: boolean;
-            endCursor?: string;
-          })
-        : undefined;
-    cursor = pageInfo?.hasNextPage ? (pageInfo.endCursor ?? null) : null;
-  } while (cursor);
+  const allNodes = await fetchAllNodes(admin, query, variables, dataPath);
 
   const filtered = applyFilters(allNodes, args.rowFilters);
-  console.log(`[Export] ${allNodes.length} total rows, ${filtered.length} after filters`);
+  console.log(`[Export Excel] ${allNodes.length} total, ${filtered.length} after filters`);
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "AI Report Assistant";
@@ -179,26 +204,8 @@ export async function exportChart(
     args.chartType === "bar" ? "bar" : args.chartType === "pie" ? "pie" : "line"
   ) as "bar" | "pie" | "line";
 
-  const allNodes: Array<Record<string, unknown>> = [];
-  let cursor: string | null = null;
-
-  do {
-    if (cursor) variables.after = cursor;
-    const resp = await admin.graphql(query, { variables });
-    const json = (await resp.json()) as Record<string, unknown>;
-    allNodes.push(...extractRows(json, dataPath));
-
-    const data = json.data as Record<string, unknown> | undefined;
-    const resource = data ? getNestedValue(data, dataPath) : undefined;
-    const pageInfo =
-      resource && typeof resource === "object"
-        ? ((resource as Record<string, unknown>).pageInfo as {
-            hasNextPage?: boolean;
-            endCursor?: string;
-          })
-        : undefined;
-    cursor = pageInfo?.hasNextPage ? (pageInfo.endCursor ?? null) : null;
-  } while (cursor);
+  const allNodes = await fetchAllNodes(admin, query, variables, dataPath);
+  console.log(`[Chart] ${allNodes.length} nodes fetched`);
 
   let labels: string[];
   let values: number[];
