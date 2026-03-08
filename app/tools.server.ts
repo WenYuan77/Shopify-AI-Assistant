@@ -51,6 +51,37 @@ function resolveField(node: Record<string, unknown>, key: string): unknown {
 
 /* ── export_to_excel ── */
 
+export interface RowFilter {
+  field: string;
+  operator: "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "contains";
+  value: unknown;
+}
+
+function applyFilters(
+  nodes: Array<Record<string, unknown>>,
+  filters?: RowFilter[],
+): Array<Record<string, unknown>> {
+  if (!filters?.length) return nodes;
+  return nodes.filter((node) =>
+    filters.every((f) => {
+      const raw = resolveField(node, f.field);
+      const val = typeof raw === "string" && !isNaN(Number(raw)) ? Number(raw) : raw;
+      const cmp = f.value;
+      switch (f.operator) {
+        case "eq":  return val == cmp;
+        case "ne":  return val != cmp;
+        case "lt":  return Number(val) <  Number(cmp);
+        case "lte": return Number(val) <= Number(cmp);
+        case "gt":  return Number(val) >  Number(cmp);
+        case "gte": return Number(val) >= Number(cmp);
+        case "contains":
+          return String(val).toLowerCase().includes(String(cmp).toLowerCase());
+        default: return true;
+      }
+    }),
+  );
+}
+
 export async function exportToExcel(
   admin: { graphql: GqlFn },
   args: {
@@ -59,6 +90,7 @@ export async function exportToExcel(
     title: string;
     columns: Array<{ header: string; key: string; width?: number }>;
     dataPath: string;
+    rowFilters?: RowFilter[];
   },
 ): Promise<{ result: unknown; attachment: Attachment }> {
   const { query, title, columns, dataPath } = args;
@@ -87,7 +119,8 @@ export async function exportToExcel(
     cursor = pageInfo?.hasNextPage ? (pageInfo.endCursor ?? null) : null;
   } while (cursor);
 
-  console.log(`[Export] ${allNodes.length} rows extracted from ${dataPath}`);
+  const filtered = applyFilters(allNodes, args.rowFilters);
+  console.log(`[Export] ${allNodes.length} total rows, ${filtered.length} after filters`);
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "AI Report Assistant";
@@ -102,7 +135,7 @@ export async function exportToExcel(
   hdr.font = { bold: true, color: { argb: "FFFFFFFF" } };
   hdr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4472C4" } };
 
-  for (const node of allNodes) {
+  for (const node of filtered) {
     const row: Record<string, unknown> = {};
     for (const col of columns) {
       row[col.key] = resolveField(node, col.key);
@@ -114,7 +147,7 @@ export async function exportToExcel(
   const filename = `report_${safeFilename(title)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
   return {
-    result: { success: true, filename, rowCount: allNodes.length },
+    result: { success: true, filename, rowCount: filtered.length },
     attachment: {
       base64: Buffer.from(buf as ArrayBuffer).toString("base64"),
       filename,

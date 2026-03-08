@@ -70,6 +70,28 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
             description:
               "Dot path to the edges array in the response, e.g. 'products' → will access data.products.edges",
           },
+          rowFilters: {
+            type: "array",
+            description:
+              "Optional filters applied to each row AFTER querying. Use when the API does not support server-side filtering (e.g. inventory quantity).",
+            items: {
+              type: "object",
+              properties: {
+                field: {
+                  type: "string",
+                  description: "Field path in the node, e.g. 'variants.edges.0.node.inventoryQuantity'",
+                },
+                operator: {
+                  type: "string",
+                  enum: ["eq", "ne", "lt", "lte", "gt", "gte", "contains"],
+                },
+                value: {
+                  description: "Value to compare against (number or string)",
+                },
+              },
+              required: ["field", "operator", "value"],
+            },
+          },
         },
         required: ["query", "title", "columns", "dataPath"],
       },
