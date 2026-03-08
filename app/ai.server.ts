@@ -1,158 +1,230 @@
 import OpenAI from "openai";
 
 const apiKey = process.env.OPENAI_API_KEY;
+const MAX_TOOL_RESULT_LENGTH = 15000;
+const MAX_ITERATIONS = 8;
 
-/** 图表类型 */
-export type ChartType = "line" | "bar" | "pie" | "area" | "doughnut" | "horizontalBar";
-/** 数据实体 */
-export type EntityType = "orders" | "products" | "customers" | "inventory" | "collections" | "refunds" | "fulfillments";
-/** 分组维度 */
-export type GroupByType = "month" | "quarter" | "year" | "week" | "day" | "product" | "productType" | "productVendor" | "status" | "fulfillmentStatus" | "salesChannel" | "customerSegment" | "location" | "region" | "paymentMethod";
-/** 指标类型 */
-export type MetricType = "count" | "sales_amount" | "quantity" | "average_order_value" | "refund_amount" | "discount_amount" | "total_tax";
-/** 输出格式 */
-export type OutputType = "chart" | "table" | "excel";
+const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "run_shopify_query",
+      description:
+        "Execute a read-only Shopify Admin GraphQL query to fetch store data (products, orders, customers, collections, inventory, etc.).",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "A valid Shopify Admin GraphQL query string",
+          },
+          variables: {
+            type: "object",
+            description: "Optional GraphQL variables",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_chart",
+      description:
+        "Generate a chart (line / bar / pie) embedded in an Excel file for the user to download. Call this AFTER you have queried the data.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Chart and sheet title" },
+          chartType: {
+            type: "string",
+            enum: ["line", "bar", "pie"],
+          },
+          labels: {
+            type: "array",
+            items: { type: "string" },
+            description: "Category labels (x-axis or slices)",
+          },
+          values: {
+            type: "array",
+            items: { type: "number" },
+            description: "Numeric values matching each label",
+          },
+          valueLabel: {
+            type: "string",
+            description: "Series name shown in legend, e.g. 销售额",
+          },
+        },
+        required: ["title", "chartType", "labels", "values", "valueLabel"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_excel",
+      description:
+        "Generate an Excel spreadsheet from tabular data for the user to download.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Sheet title" },
+          columns: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                header: { type: "string" },
+                key: { type: "string" },
+                width: { type: "number" },
+              },
+              required: ["header", "key"],
+            },
+          },
+          rows: {
+            type: "array",
+            items: { type: "object" },
+            description: "Row objects whose keys match column keys",
+          },
+        },
+        required: ["title", "columns", "rows"],
+      },
+    },
+  },
+];
 
-export interface ReportIntent {
-  chartType?: ChartType;
-  entity?: EntityType;
-  filters?: {
-    dateRange?: string;
-    productId?: string;
-    productIds?: string[];
-    productType?: string;
-    status?: string;
-    fulfillmentStatus?: string;
-    salesChannel?: string;
-    minAmount?: number;
-    maxAmount?: number;
-  };
-  groupBy?: GroupByType;
-  metric?: MetricType;
-  outputType?: OutputType;
-  needsClarification?: boolean;
-  clarificationQuestion?: string;
-}
-
-export interface StoreMetadata {
-  hasProducts: boolean;
-  hasOrders: boolean;
-  ordersDateRange: { from: string; to: string } | null;
-  productsCount: number;
-  ordersCount: number;
-  customersCount: number | null;
-  collectionsCount: number | null;
-}
-
-/** 回复 | 拒绝 | 明确报表意图 */
-export type AIResponse =
-  | { type: "reply"; content: string; suggestedIntent?: ReportIntent }
-  | { type: "refuse"; content: string }
-  | { type: "intent"; intent: ReportIntent };
-
-function buildSystemPrompt(metadata: StoreMetadata | null): string {
+function buildSystemPrompt(): string {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const today = `${year}-${month}-${String(now.getDate()).padStart(2, "0")}`;
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const prevMonth =
+    now.getMonth() === 0
+      ? `${y - 1}-12`
+      : `${y}-${String(now.getMonth()).padStart(2, "0")}`;
 
-  const metadataNote = metadata
-    ? `
-【店铺数据概况】请据此回答用户的数据查询并给出建议（实时数据）：
-- 产品数量：${metadata.productsCount}
-- 订单数量：${metadata.ordersCount}
-- 客户数量：${metadata.customersCount ?? "未配置权限"}
-- 产品系列数量：${metadata.collectionsCount ?? "未知"}
-${metadata.ordersDateRange ? `- 订单日期范围：${metadata.ordersDateRange.from} 至 ${metadata.ordersDateRange.to}` : ""}
-`
-    : "";
+  return `你是 Shopify 店铺的 AI 数据助手。你可以通过工具查询店铺的实时数据，并生成报表和图表。
 
-  return `你是报表助手，帮助用户查询店铺销售数据并生成图表/报表。
+【当前日期】${y}-${m}-${d}
+今年=${y}  去年=${y - 1}  本月=${y}-${m}  上个月=${prevMonth}
 
-【当前日期】${year}年${month}月${String(now.getDate()).padStart(2, "0")}日
-- 今年 → "${year}"
-- 去年 → "${year - 1}"
-- 本月 → "${year}-${month}"
-${metadataNote}
+【Shopify Admin GraphQL API（版本 2025-10）常用查询参考】
 
-【输出格式】严格返回以下三种之一（仅 JSON，无其他文字）：
+产品列表:
+  query($first:Int!,$after:String,$query:String){products(first:$first,after:$after,query:$query,sortKey:TITLE){edges{node{id title status handle createdAt updatedAt variants(first:10){edges{node{id sku price compareAtPrice inventoryQuantity}}}}}pageInfo{hasNextPage endCursor}}}
 
-1. type: "reply" - 用户询问建议、解释或需要自然语言回复时
-   - content: 自然语言回复
-   - 若给出了推荐图表建议，可附带 suggestedIntent（结构同 intent）
+订单列表:
+  query($first:Int!,$after:String,$query:String){orders(first:$first,after:$after,query:$query,sortKey:CREATED_AT,reverse:true){edges{node{id name createdAt totalPriceSet{shopMoney{amount currencyCode}} lineItems(first:50){edges{node{title quantity originalTotalSet{shopMoney{amount}} sku}}} customer{displayName email}}cursor}pageInfo{hasNextPage endCursor}}}
 
-2. type: "refuse" - 用户问与店铺数据/报表完全无关的问题
-   - content: 礼貌拒绝，说明你只负责店铺数据和报表相关的问题
+客户列表:
+  query($first:Int!,$query:String){customers(first:$first,query:$query){edges{node{id displayName email ordersCount totalSpent{amount currencyCode} createdAt}}pageInfo{hasNextPage endCursor}}}
 
-3. type: "intent" - 用户明确要求生成某类报表/图表时
-   - intent: { chartType, entity, filters, groupBy, metric, outputType }
-   - chartType: line(趋势) | bar(对比) | pie(占比) | area(面积) | doughnut(环形) | horizontalBar(横向柱状)
-   - entity: orders | products | customers | inventory | collections | refunds | fulfillments
-   - filters: dateRange(今年/去年/本月用上述规则) | productId | productType | status | fulfillmentStatus | salesChannel | minAmount | maxAmount
-   - groupBy: month | quarter | year | week | day | product | productType | productVendor | status | fulfillmentStatus | salesChannel | customerSegment | location | region | paymentMethod
-   - metric: count | sales_amount | quantity | average_order_value | refund_amount | discount_amount | total_tax
-   - outputType: chart | table | excel
+聚合计数:
+  query{productsCount{count} ordersCount{count} customersCount{count} collectionsCount{count}}
 
-【判断原则】
-- 问"有什么建议""该看什么数据"→ type: "reply"，结合店铺数据概况给出建议
-- 问"帮我生成去年每月销量图"→ type: "intent"
-- 问天气、八卦、无关话题 → type: "refuse"`;
+产品系列:
+  query($first:Int!){collections(first:$first){edges{node{id title productsCount{count}}}}}
+
+订单日期过滤示例: query:"created_at:>=${y}-01-01 AND created_at:<${y}-02-01 status:any"
+
+【规则】
+1. 仅使用 query，禁止 mutation。
+2. 分页: first 最大 250，用 after + pageInfo.endCursor 翻页。如果需要所有数据，循环调用直到 hasNextPage=false。
+3. 拿到数据后，用中文自然语言把关键信息总结给用户。
+4. 用户要图表 → 先查数据，再调用 generate_chart 生成可下载的 Excel 图表文件。
+5. 用户要导出表格 → 先查数据，再调用 generate_excel 生成可下载的 Excel 文件。
+6. 与店铺数据无关的问题，礼貌拒绝并说明你的职责。`;
 }
 
-export async function parseReportIntent(
-  userText: string,
-  metadata: StoreMetadata | null = null
-): Promise<AIResponse> {
+export interface Attachment {
+  base64: string;
+  filename: string;
+  mimeType: string;
+}
+
+export interface ChatResult {
+  content: string;
+  attachment?: Attachment;
+}
+
+export type ToolHandler = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<{ result: unknown; attachment?: Attachment }>;
+
+export async function processChat(
+  userMessage: string,
+  executeTool: ToolHandler,
+): Promise<ChatResult> {
   if (!apiKey) {
     return {
-      type: "reply",
       content: "请先在环境变量中配置 OPENAI_API_KEY 以启用智能解析。",
     };
   }
 
   const openai = new OpenAI({ apiKey });
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: buildSystemPrompt() },
+    { role: "user", content: userMessage },
+  ];
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: buildSystemPrompt(metadata) },
-      { role: "user", content: userText },
-    ],
-    temperature: 0.3,
-  });
+  let attachment: Attachment | undefined;
 
-  const content = completion.choices[0]?.message?.content?.trim() ?? "{}";
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages,
+      tools: TOOLS,
+      temperature: 0.3,
+    });
 
-  try {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const choice = completion.choices[0];
+    if (!choice) return { content: "AI 未返回有效响应，请重试。" };
 
-    if (parsed.type === "refuse" && typeof parsed.content === "string") {
-      return { type: "refuse", content: parsed.content };
+    const msg = choice.message;
+    messages.push(msg);
+
+    if (!msg.tool_calls?.length) {
+      return { content: msg.content ?? "", attachment };
     }
 
-    if (parsed.type === "reply" && typeof parsed.content === "string") {
-      const suggestedIntent =
-        parsed.suggestedIntent && typeof parsed.suggestedIntent === "object"
-          ? (parsed.suggestedIntent as ReportIntent)
-          : undefined;
-      return { type: "reply", content: parsed.content, suggestedIntent };
-    }
+    for (const tc of msg.tool_calls) {
+      if (tc.type !== "function") continue;
+      let args: Record<string, unknown>;
+      try {
+        args = JSON.parse(tc.function.arguments);
+      } catch {
+        messages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: '{"error":"Invalid JSON in tool call arguments"}',
+        });
+        continue;
+      }
 
-    if (parsed.type === "intent" && parsed.intent && typeof parsed.intent === "object") {
-      return {
-        type: "intent",
-        intent: parsed.intent as ReportIntent,
-      };
-    }
+      try {
+        const out = await executeTool(tc.function.name, args);
+        if (out.attachment) attachment = out.attachment;
 
-    return {
-      type: "reply",
-      content: "无法解析您的需求，请换个说法再试。",
-    };
-  } catch {
-    return {
-      type: "reply",
-      content: "无法解析您的需求，请换个说法再试。",
-    };
+        let json = JSON.stringify(out.result);
+        if (json.length > MAX_TOOL_RESULT_LENGTH) {
+          json =
+            json.slice(0, MAX_TOOL_RESULT_LENGTH) +
+            "\n...[truncated — only partial data shown]";
+        }
+        messages.push({ role: "tool", tool_call_id: tc.id, content: json });
+      } catch (err) {
+        messages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: JSON.stringify({
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        });
+      }
+    }
   }
+
+  return { content: "处理步骤超过限制，请简化您的请求后重试。", attachment };
 }

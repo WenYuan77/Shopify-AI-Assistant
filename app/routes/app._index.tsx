@@ -7,16 +7,20 @@ import type {
 import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { parseReportIntent, type ReportIntent } from "../ai.server";
-import { getStoreMetadata, type StoreMetadata } from "../store-metadata.server";
+import { processChat, type ToolHandler } from "../ai.server";
+import { generateChart, generateExcel } from "../tools.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+
+/* ── types ── */
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  attachment?: { url: string; filename: string };
+  attachment?: { base64: string; filename: string; mimeType: string };
 }
+
+/* ── loader / action ── */
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -26,103 +30,60 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const prompt = formData.get("prompt");
-
   if (typeof prompt !== "string" || !prompt.trim()) {
     return { content: "请输入您的问题。" };
   }
 
   const { admin } = await authenticate.admin(request);
-  const metadata = await getStoreMetadata(admin);
-  const aiResponse = await parseReportIntent(prompt.trim(), metadata);
 
-  if (aiResponse.type === "refuse") {
-    return { content: aiResponse.content };
-  }
+  const executeTool: ToolHandler = async (name, args) => {
+    if (name === "run_shopify_query") {
+      const query = args.query as string;
+      if (/^\s*mutation\b/i.test(query.replace(/^#.*\n?/, ""))) {
+        return {
+          result: { error: "Mutations are not allowed. Use query only." },
+        };
+      }
+      const variables = (args.variables as Record<string, unknown>) ?? {};
+      const response = await admin.graphql(query, { variables });
+      return { result: await response.json() };
+    }
 
-  if (aiResponse.type === "reply") {
-    return {
-      content: aiResponse.content,
-      attachment: aiResponse.suggestedIntent
-        ? attachmentFromIntent(aiResponse.suggestedIntent)
-        : undefined,
-    };
-  }
+    if (name === "generate_chart") {
+      return generateChart(
+        args as {
+          title: string;
+          chartType: string;
+          labels: string[];
+          values: number[];
+          valueLabel: string;
+        },
+      );
+    }
 
-  return intentResponse(aiResponse.intent, metadata);
+    if (name === "generate_excel") {
+      return generateExcel(
+        args as {
+          title: string;
+          columns: Array<{ header: string; key: string; width?: number }>;
+          rows: Array<Record<string, unknown>>;
+        },
+      );
+    }
+
+    return { result: { error: `Unknown tool: ${name}` } };
+  };
+
+  return await processChat(prompt.trim(), executeTool);
 };
 
-function attachmentFromIntent(intent: ReportIntent) {
-  if (intent.entity === "products") {
-    return {
-      url: "/reports/products",
-      filename: `products-report_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    };
-  }
-  if (intent.entity === "orders" && intent.chartType) {
-    const params = new URLSearchParams({
-      chartType: intent.chartType,
-      dateRange: intent.filters?.dateRange ?? String(new Date().getFullYear()),
-      metric: intent.metric ?? "count",
-    });
-    return {
-      url: `/reports/chart?${params}`,
-      filename: `sales-chart_${intent.filters?.dateRange ?? new Date().getFullYear()}.xlsx`,
-    };
-  }
-  return undefined;
-}
-
-function intentResponse(intent: ReportIntent, metadata: StoreMetadata) {
-  const attachment = attachmentFromIntent(intent);
-
-  if (intent.entity === "products") {
-    const lines = [
-      "好的，已为您生成产品报告。",
-      "",
-      "📊 店铺数据概况：",
-      `• 产品总数：${metadata.productsCount}`,
-      `• 订单总数：${metadata.ordersCount}`,
-    ];
-    if (metadata.customersCount !== null)
-      lines.push(`• 客户总数：${metadata.customersCount}`);
-    if (metadata.ordersDateRange)
-      lines.push(
-        `• 订单时间范围：${metadata.ordersDateRange.from} 至 ${metadata.ordersDateRange.to}`,
-      );
-    lines.push("", "报告已生成，请点击下方按钮下载。");
-    return { content: lines.join("\n"), attachment };
-  }
-
-  if (intent.entity === "orders") {
-    const dateRange =
-      intent.filters?.dateRange ?? String(new Date().getFullYear());
-    const metricLabel =
-      intent.metric === "sales_amount" ? "销售额" : "订单数";
-    const chartLabels: Record<string, string> = {
-      bar: "柱状图",
-      pie: "饼图",
-      line: "折线图",
-      area: "面积图",
-      doughnut: "环形图",
-      horizontalBar: "横向柱状图",
-    };
-    const chartLabel = chartLabels[intent.chartType ?? "line"] ?? "图表";
-    return {
-      content: `好的，已为您生成 ${dateRange} 的每月${metricLabel}${chartLabel}。\n\n报告已生成，请点击下方按钮下载。`,
-      attachment,
-    };
-  }
-
-  return {
-    content: `已理解您的需求（数据类型：${intent.entity ?? "未指定"}），该报告类型正在开发中，敬请期待。`,
-  };
-}
+/* ── component ── */
 
 const WELCOME: ChatMessage = {
   id: "welcome",
   role: "assistant",
   content:
-    "你好！我是 AI 报告助手 👋\n\n我可以帮你查询和分析店铺数据，生成报表和图表。你可以这样问我：\n\n• 帮我生成产品销售报告\n• 去年每月的销量图表\n• 我的店铺数据概况怎么样？",
+    "你好！我是 AI 报告助手 👋\n\n我可以直接查询你的店铺数据，并生成报表和图表。试试这样问我：\n\n• 我的店铺有多少产品和订单？\n• 帮我查上个月每款产品的销量\n• 把订单数据导出成 Excel\n• 生成今年每月销售额的柱状图",
 };
 
 export default function Index() {
@@ -140,7 +101,7 @@ export default function Index() {
       pendingRef.current = false;
       const d = fetcher.data as {
         content: string;
-        attachment?: { url: string; filename: string };
+        attachment?: { base64: string; filename: string; mimeType: string };
       };
       setMessages((prev) => [
         ...prev,
@@ -170,35 +131,28 @@ export default function Index() {
     fetcher.submit({ prompt: text }, { method: "POST" });
   };
 
-  const download = (att: { url: string; filename: string }) => {
-    const search = window.location.search;
-    let url = att.url;
-    if (search) url += (url.includes("?") ? "&" : "?") + search.slice(1);
-    shopify.toast.show("报告下载中...");
-    fetch(url, { credentials: "include" })
-      .then((r) => {
-        if (!r.ok) throw new Error(r.statusText);
-        return r.arrayBuffer();
-      })
-      .then((buf) => {
-        const blob = new Blob([buf], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = att.filename;
-        a.click();
-        URL.revokeObjectURL(a.href);
-        shopify.toast.show("报告已下载");
-      })
-      .catch(() => shopify.toast.show("下载失败，请重试"));
+  const download = (att: {
+    base64: string;
+    filename: string;
+    mimeType: string;
+  }) => {
+    const bin = atob(att.base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: att.mimeType });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = att.filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    shopify.toast.show("文件已下载");
   };
 
   return (
-    <div style={s.page}>
-      <div style={s.header}>AI Report Assistant</div>
+    <div style={st.page}>
+      <div style={st.header}>AI Report Assistant</div>
 
-      <div style={s.chat}>
+      <div style={st.chat}>
         {messages.map((m) => (
           <div
             key={m.id}
@@ -209,19 +163,19 @@ export default function Index() {
               marginBottom: 16,
             }}
           >
-            <div style={s.label}>
+            <div style={st.label}>
               {m.role === "user" ? "You" : "AI Assistant"}
             </div>
             <div
               style={{
-                ...s.bubble,
-                ...(m.role === "user" ? s.userBubble : s.aiBubble),
+                ...st.bubble,
+                ...(m.role === "user" ? st.userBubble : st.aiBubble),
               }}
             >
               <div style={{ whiteSpace: "pre-wrap" as const }}>{m.content}</div>
               {m.attachment && (
                 <button
-                  style={s.dlBtn}
+                  style={st.dlBtn}
                   onClick={() => download(m.attachment!)}
                 >
                   📥 下载 {m.attachment.filename}
@@ -240,9 +194,9 @@ export default function Index() {
               marginBottom: 16,
             }}
           >
-            <div style={s.label}>AI Assistant</div>
-            <div style={{ ...s.bubble, ...s.aiBubble, color: "#6b7280" }}>
-              正在思考...
+            <div style={st.label}>AI Assistant</div>
+            <div style={{ ...st.bubble, ...st.aiBubble, color: "#6b7280" }}>
+              正在查询数据并分析中...
             </div>
           </div>
         )}
@@ -250,10 +204,10 @@ export default function Index() {
         <div ref={bottomRef} />
       </div>
 
-      <div style={s.inputBar}>
+      <div style={st.inputBar}>
         <input
           type="text"
-          style={s.input}
+          style={st.input}
           placeholder="Ask me anything about your store data..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -267,7 +221,7 @@ export default function Index() {
         />
         <button
           style={{
-            ...s.sendBtn,
+            ...st.sendBtn,
             ...(!input.trim() || isLoading
               ? { backgroundColor: "#d1d5db", cursor: "not-allowed" }
               : {}),
@@ -282,7 +236,9 @@ export default function Index() {
   );
 }
 
-const s: Record<string, React.CSSProperties> = {
+/* ── styles ── */
+
+const st: Record<string, React.CSSProperties> = {
   page: {
     display: "flex",
     flexDirection: "column",
@@ -296,11 +252,7 @@ const s: Record<string, React.CSSProperties> = {
     color: "#1a1a1a",
     borderBottom: "1px solid #e5e7eb",
   },
-  chat: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "24px",
-  },
+  chat: { flex: 1, overflowY: "auto", padding: "24px" },
   label: {
     fontSize: 12,
     color: "#6b7280",
