@@ -134,7 +134,8 @@ function buildSystemPrompt(): string {
 3. 拿到数据后，用中文自然语言把关键信息总结给用户。
 4. 用户要图表 → 先查数据，再调用 generate_chart 生成可下载的 Excel 图表文件。
 5. 用户要导出表格 → 先查数据，再调用 generate_excel 生成可下载的 Excel 文件。
-6. 与店铺数据无关的问题，礼貌拒绝并说明你的职责。`;
+6. 与店铺数据无关的问题，礼貌拒绝并说明你的职责。
+7. 如果工具调用返回错误，根据错误信息修正查询后重试（最多重试一次）。不要告诉用户"技术问题"，而是尝试修复。`;
 }
 
 export interface Attachment {
@@ -148,15 +149,15 @@ export interface ChatResult {
   attachment?: Attachment;
 }
 
-export type ToolHandler = (
-  name: string,
-  args: Record<string, unknown>,
-) => Promise<{ result: unknown; attachment?: Attachment }>;
-
 export interface HistoryMessage {
   role: "user" | "assistant";
   content: string;
 }
+
+export type ToolHandler = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<{ result: unknown; attachment?: Attachment }>;
 
 export async function processChat(
   userMessage: string,
@@ -182,6 +183,8 @@ export async function processChat(
   let attachment: Attachment | undefined;
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
+    console.log(`[AI] Iteration ${i + 1}/${MAX_ITERATIONS}`);
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
@@ -196,11 +199,14 @@ export async function processChat(
     messages.push(msg);
 
     if (!msg.tool_calls?.length) {
+      console.log(`[AI] Final response (iteration ${i + 1})`);
       return { content: msg.content ?? "", attachment };
     }
 
     for (const tc of msg.tool_calls) {
       if (tc.type !== "function") continue;
+      console.log(`[AI] Tool call: ${tc.function.name}`, tc.function.arguments.slice(0, 200));
+
       let args: Record<string, unknown>;
       try {
         args = JSON.parse(tc.function.arguments);
@@ -223,14 +229,15 @@ export async function processChat(
             json.slice(0, MAX_TOOL_RESULT_LENGTH) +
             "\n...[truncated — only partial data shown]";
         }
+        console.log(`[AI] Tool result for ${tc.function.name}: ${json.length} chars`);
         messages.push({ role: "tool", tool_call_id: tc.id, content: json });
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[AI] Tool error for ${tc.function.name}:`, errMsg);
         messages.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: JSON.stringify({
-            error: err instanceof Error ? err.message : String(err),
-          }),
+          content: JSON.stringify({ error: errMsg }),
         });
       }
     }

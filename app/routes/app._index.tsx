@@ -53,8 +53,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         };
       }
       const variables = (args.variables as Record<string, unknown>) ?? {};
-      const response = await admin.graphql(query, { variables });
-      return { result: await response.json() };
+      try {
+        const response = await admin.graphql(query, { variables });
+        const result = await response.json();
+        return { result };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[Tool] run_shopify_query error:`, msg);
+        return { result: { error: `GraphQL request failed: ${msg}` } };
+      }
     }
 
     if (name === "generate_chart") {
