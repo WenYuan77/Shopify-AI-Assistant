@@ -153,9 +153,15 @@ export type ToolHandler = (
   args: Record<string, unknown>,
 ) => Promise<{ result: unknown; attachment?: Attachment }>;
 
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export async function processChat(
   userMessage: string,
   executeTool: ToolHandler,
+  history: HistoryMessage[] = [],
 ): Promise<ChatResult> {
   if (!apiKey) {
     return {
@@ -166,6 +172,10 @@ export async function processChat(
   const openai = new OpenAI({ apiKey });
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt() },
+    ...history.map((h) => ({
+      role: h.role as "user" | "assistant",
+      content: h.content,
+    })),
     { role: "user", content: userMessage },
   ];
 

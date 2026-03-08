@@ -7,7 +7,7 @@ import type {
 import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { processChat, type ToolHandler } from "../ai.server";
+import { processChat, type ToolHandler, type HistoryMessage } from "../ai.server";
 import { generateChart, generateExcel } from "../tools.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -32,6 +32,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const prompt = formData.get("prompt");
   if (typeof prompt !== "string" || !prompt.trim()) {
     return { content: "请输入您的问题。" };
+  }
+
+  let history: HistoryMessage[] = [];
+  const historyRaw = formData.get("history");
+  if (typeof historyRaw === "string" && historyRaw) {
+    try {
+      history = JSON.parse(historyRaw);
+    } catch { /* ignore */ }
   }
 
   const { admin } = await authenticate.admin(request);
@@ -74,7 +82,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { result: { error: `Unknown tool: ${name}` } };
   };
 
-  return await processChat(prompt.trim(), executeTool);
+  return await processChat(prompt.trim(), executeTool, history);
 };
 
 /* ── component ── */
@@ -122,13 +130,23 @@ export default function Index() {
   const send = () => {
     const text = input.trim();
     if (!text || isLoading) return;
-    setMessages((prev) => [
-      ...prev,
-      { id: `user-${Date.now()}`, role: "user", content: text },
-    ]);
+    const updated = [
+      ...messages,
+      { id: `user-${Date.now()}`, role: "user" as const, content: text },
+    ];
+    setMessages(updated);
     setInput("");
     pendingRef.current = true;
-    fetcher.submit({ prompt: text }, { method: "POST" });
+
+    const recent = updated
+      .filter((m) => m.id !== "welcome")
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    fetcher.submit(
+      { prompt: text, history: JSON.stringify(recent.slice(0, -1)) },
+      { method: "POST" },
+    );
   };
 
   const download = (att: {
