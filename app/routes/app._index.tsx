@@ -8,7 +8,7 @@ import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { processChat, type ToolHandler, type HistoryMessage } from "../ai.server";
-import { generateChart, generateExcel } from "../tools.server";
+import { exportToExcel, exportChart } from "../tools.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 /* ── types ── */
@@ -48,45 +48,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (name === "run_shopify_query") {
       const query = args.query as string;
       if (/^\s*mutation\b/i.test(query.replace(/^#.*\n?/, ""))) {
-        return {
-          result: { error: "Mutations are not allowed. Use query only." },
-        };
+        return { result: { error: "Mutations are not allowed." } };
       }
       const variables = (args.variables as Record<string, unknown>) ?? {};
-      if (/\$first\s*:\s*Int/i.test(query) && !variables.first) {
-        variables.first = 250;
-      }
+      if (/\$first/i.test(query) && !variables.first) variables.first = 250;
       try {
         const response = await admin.graphql(query, { variables });
-        const result = await response.json();
-        return { result };
+        return { result: await response.json() };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[Tool] run_shopify_query error:`, msg);
-        return { result: { error: `GraphQL request failed: ${msg}` } };
+        return { result: { error: `GraphQL failed: ${msg}` } };
       }
     }
 
-    if (name === "generate_chart") {
-      return generateChart(
-        args as {
-          title: string;
-          chartType: string;
-          labels: string[];
-          values: number[];
-          valueLabel: string;
-        },
-      );
+    if (name === "export_to_excel") {
+      return exportToExcel(admin, args as Parameters<typeof exportToExcel>[1]);
     }
 
-    if (name === "generate_excel") {
-      return generateExcel(
-        args as {
-          title: string;
-          columns: Array<{ header: string; key: string; width?: number }>;
-          rows: Array<Record<string, unknown>>;
-        },
-      );
+    if (name === "export_chart") {
+      return exportChart(admin, args as Parameters<typeof exportChart>[1]);
     }
 
     return { result: { error: `Unknown tool: ${name}` } };
