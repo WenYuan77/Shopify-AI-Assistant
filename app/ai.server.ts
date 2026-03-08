@@ -2,7 +2,7 @@ import OpenAI from "openai";
 
 const apiKey = process.env.OPENAI_API_KEY;
 const MAX_TOOL_RESULT_LENGTH = 15000;
-const MAX_ITERATIONS = 8;
+const MAX_ITERATIONS = 20;
 
 const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
   {
