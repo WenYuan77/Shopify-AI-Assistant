@@ -2,7 +2,7 @@ import OpenAI from "openai";
 
 const apiKey = process.env.OPENAI_API_KEY;
 const MAX_TOOL_RESULT_LENGTH = 15000;
-const MAX_ITERATIONS = 15;
+const MAX_ITERATIONS = 10;
 
 const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
   {
@@ -10,18 +10,12 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "run_shopify_query",
       description:
-        "Execute a read-only Shopify Admin GraphQL query to fetch store data and return results as TEXT to the user. Use this for answering questions, showing summaries, etc.",
+        "Execute a read-only Shopify Admin GraphQL query and return results as TEXT to the user. For answering questions and showing summaries only — NOT for file exports.",
       parameters: {
         type: "object",
         properties: {
-          query: {
-            type: "string",
-            description: "A valid Shopify Admin GraphQL query string",
-          },
-          variables: {
-            type: "object",
-            description: "Optional GraphQL variables",
-          },
+          query: { type: "string", description: "Shopify Admin GraphQL query" },
+          variables: { type: "object", description: "Optional variables" },
         },
         required: ["query"],
       },
@@ -32,68 +26,56 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "export_to_excel",
       description:
-        "Query Shopify data and export to a downloadable Excel file. The BACKEND handles querying, data extraction, and file generation. Use this when the user wants to download/export data.",
+        "Export Shopify store data to a downloadable Excel file. The backend queries Shopify and generates the file — you only specify WHAT to export.",
       parameters: {
         type: "object",
         properties: {
-          query: {
+          resource: {
             type: "string",
-            description: "Shopify GraphQL query to execute",
+            enum: ["products", "orders", "customers", "collections"],
+            description: "Which data to export",
           },
-          variables: {
-            type: "object",
-            description: "Optional GraphQL variables",
-          },
-          title: {
+          title: { type: "string", description: "Excel title, e.g. '产品报告'" },
+          dateRange: {
             type: "string",
-            description: "Excel sheet title, e.g. '产品数据报告'",
+            description: "For orders: date filter, e.g. 'created_at:>=2026-01-01 AND created_at:<2026-02-01'",
+          },
+          queryFilter: {
+            type: "string",
+            description: "Additional Shopify query filter, e.g. 'status:any', 'financial_status:paid'",
           },
           columns: {
             type: "array",
             items: {
               type: "object",
               properties: {
-                header: { type: "string", description: "Column display name" },
-                key: {
-                  type: "string",
-                  description:
-                    "Field path in each node, e.g. 'title', 'status', 'variants.edges.0.node.price'",
-                },
+                header: { type: "string" },
+                key: { type: "string" },
                 width: { type: "number" },
               },
               required: ["header", "key"],
             },
-            description: "Column definitions mapping GraphQL fields to spreadsheet columns",
-          },
-          dataPath: {
-            type: "string",
-            description:
-              "Dot path to the edges array in the response, e.g. 'products' → will access data.products.edges",
+            description: "Custom column list. Omit to use defaults. Available keys — products: title,status,productType,vendor,sku,price,compareAtPrice,inventoryQuantity,createdAt; orders: name,createdAt,totalPrice,subtotal,totalTax,totalDiscount,displayFinancialStatus,displayFulfillmentStatus,customerName,customerEmail,city,country; customers: displayName,email,phone,ordersCount,totalSpent,city,province,country,createdAt; collections: title,handle,productsCount,updatedAt",
           },
           rowFilters: {
             type: "array",
-            description:
-              "Optional filters applied to each row AFTER querying. Use when the API does not support server-side filtering (e.g. inventory quantity).",
             items: {
               type: "object",
               properties: {
-                field: {
-                  type: "string",
-                  description: "Field path in the node, e.g. 'variants.edges.0.node.inventoryQuantity'",
-                },
-                operator: {
-                  type: "string",
-                  enum: ["eq", "ne", "lt", "lte", "gt", "gte", "contains"],
-                },
-                value: {
-                  description: "Value to compare against (number or string)",
-                },
+                field: { type: "string", description: "Row field to filter on" },
+                operator: { type: "string", enum: ["eq","ne","lt","lte","gt","gte","contains"] },
+                value: { description: "Comparison value" },
               },
               required: ["field", "operator", "value"],
             },
+            description: "Post-query row filters. Use for conditions the API cannot filter (e.g. inventoryQuantity, price).",
+          },
+          includeLineItems: {
+            type: "boolean",
+            description: "For orders: include individual line items (product details per order)",
           },
         },
-        required: ["query", "title", "columns", "dataPath"],
+        required: ["resource"],
       },
     },
   },
@@ -102,49 +84,31 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "export_chart",
       description:
-        "Query Shopify data and generate a chart (line/bar/pie) in a downloadable Excel file. The BACKEND handles everything.",
+        "Generate a chart (line/bar/pie) from Shopify data as a downloadable Excel file with embedded chart image.",
       parameters: {
         type: "object",
         properties: {
-          query: {
+          resource: {
             type: "string",
-            description: "Shopify GraphQL query to execute",
+            enum: ["products", "orders", "customers", "collections"],
           },
-          variables: { type: "object" },
           title: { type: "string", description: "Chart title" },
           chartType: { type: "string", enum: ["line", "bar", "pie"] },
-          dataPath: {
+          dateRange: { type: "string", description: "For orders: date filter" },
+          queryFilter: { type: "string" },
+          metric: {
             type: "string",
-            description: "Dot path to edges array, e.g. 'orders'",
-          },
-          labelField: {
-            type: "string",
-            description: "Field to use as label, e.g. 'createdAt'",
-          },
-          valueField: {
-            type: "string",
-            description:
-              "Field to use as value, e.g. 'totalPriceSet.shopMoney.amount'",
-          },
-          valueLabel: {
-            type: "string",
-            description: "Legend label, e.g. '销售额'",
+            enum: ["count", "sales_amount", "quantity"],
+            description: "What to measure: count=number of items, sales_amount=monetary value, quantity=inventory/order quantity",
           },
           groupBy: {
             type: "string",
-            enum: ["month", "day", "item"],
-            description: "How to group/aggregate the data",
+            enum: ["month", "product", "customer", "status", "city", "country"],
+            description: "How to group data on the chart",
           },
+          valueLabel: { type: "string", description: "Chart legend label, e.g. '订单数'" },
         },
-        required: [
-          "query",
-          "title",
-          "chartType",
-          "dataPath",
-          "labelField",
-          "valueField",
-          "valueLabel",
-        ],
+        required: ["resource", "title", "chartType", "metric", "groupBy"],
       },
     },
   },
@@ -160,30 +124,25 @@ function buildSystemPrompt(): string {
       ? `${y - 1}-12`
       : `${y}-${String(now.getMonth()).padStart(2, "0")}`;
 
-  return `你是 Shopify 店铺的 AI 数据助手。
+  return `你是 Shopify 店铺的 AI 数据助手。你可以查询店铺数据、导出报表和生成图表。
 
-【当前日期】${y}-${m}-${d}
-今年=${y}  去年=${y - 1}  本月=${y}-${m}  上个月=${prevMonth}
+【当前日期】${y}-${m}-${d}  今年=${y} 去年=${y - 1} 本月=${y}-${m} 上个月=${prevMonth}
 
-【Shopify Admin GraphQL API（版本 2025-10）】
-
-产品: query($first:Int!,$after:String){products(first:$first,after:$after,sortKey:TITLE){edges{node{id title status handle createdAt updatedAt variants(first:10){edges{node{id sku price compareAtPrice inventoryQuantity}}}}}pageInfo{hasNextPage endCursor}}}
-
-订单: query($first:Int!,$after:String,$query:String){orders(first:$first,after:$after,query:$query,sortKey:CREATED_AT,reverse:true){edges{node{id name createdAt totalPriceSet{shopMoney{amount currencyCode}} lineItems(first:50){edges{node{title quantity originalTotalSet{shopMoney{amount}} sku}}} customer{displayName email}}cursor}pageInfo{hasNextPage endCursor}}}
-
-客户: query($first:Int!){customers(first:$first){edges{node{id displayName email ordersCount totalSpent{amount currencyCode} createdAt}}pageInfo{hasNextPage endCursor}}}
-
+【Shopify GraphQL 参考】
+产品: query($first:Int!){products(first:$first,sortKey:TITLE){edges{node{id title status variants(first:10){edges{node{sku price inventoryQuantity}}}}}pageInfo{hasNextPage endCursor}}}
+订单: query($first:Int!,$query:String){orders(first:$first,query:$query,sortKey:CREATED_AT,reverse:true){edges{node{id name createdAt totalPriceSet{shopMoney{amount currencyCode}} lineItems(first:50){edges{node{title quantity}}} customer{displayName email}}}pageInfo{hasNextPage endCursor}}}
+客户: query($first:Int!){customers(first:$first){edges{node{id displayName email ordersCount totalSpent{amount currencyCode}}}}}
 计数: query{productsCount{count} ordersCount{count} customersCount{count}}
-
 日期过滤: query:"created_at:>=${y}-01-01 AND created_at:<${y}-02-01 status:any"
 
 【工具使用规则】
-1. 回答问题/展示数据摘要 → 用 run_shopify_query 查询，然后用中文总结。
-2. 用户要下载/导出数据 → 用 export_to_excel，传入查询和列定义，后端自动查询并生成文件。
-3. 用户要图表 → 用 export_chart，传入查询和图表配置，后端自动生成。
-4. export_to_excel 和 export_chart 的 columns/key 字段用 GraphQL node 的字段名，嵌套字段用点号，如 "variants.edges.0.node.price"。
-5. 仅 query，禁止 mutation。变量 $first 默认 250。
-6. 与店铺无关的问题礼貌拒绝。用中文回复。`;
+1. 用户问数据问题 → run_shopify_query → 用中文总结
+2. 用户要导出/下载 → export_to_excel（指定 resource + 可选 filters/columns）
+3. 用户要图表 → export_chart（指定 resource + metric + groupBy）
+4. Shopify API 不支持按库存/价格过滤 → 用 rowFilters 在后端过滤
+5. 只用 query，禁止 mutation。$first 默认 250。
+6. 与店铺无关的问题礼貌拒绝。用中文回复。
+7. 不要在 export_to_excel 或 export_chart 中尝试自己写 GraphQL，这些工具后端会自动处理。`;
 }
 
 export interface Attachment {
@@ -213,18 +172,13 @@ export async function processChat(
   history: HistoryMessage[] = [],
 ): Promise<ChatResult> {
   if (!apiKey) {
-    return {
-      content: "请先在环境变量中配置 OPENAI_API_KEY 以启用智能解析。",
-    };
+    return { content: "请先在环境变量中配置 OPENAI_API_KEY 以启用智能解析。" };
   }
 
   const openai = new OpenAI({ apiKey });
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt() },
-    ...history.map((h) => ({
-      role: h.role as "user" | "assistant",
-      content: h.content,
-    })),
+    ...history.map((h) => ({ role: h.role as "user" | "assistant", content: h.content })),
     { role: "user", content: userMessage },
   ];
 
@@ -232,7 +186,6 @@ export async function processChat(
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     console.log(`[AI] Iteration ${i + 1}/${MAX_ITERATIONS}`);
-
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
@@ -247,46 +200,35 @@ export async function processChat(
     messages.push(msg);
 
     if (!msg.tool_calls?.length) {
-      console.log(`[AI] Final response (iteration ${i + 1})`);
+      console.log(`[AI] Done (iteration ${i + 1})`);
       return { content: msg.content ?? "", attachment };
     }
 
     for (const tc of msg.tool_calls) {
       if (tc.type !== "function") continue;
-      console.log(`[AI] Tool call: ${tc.function.name}`);
+      console.log(`[AI] Tool: ${tc.function.name}`);
 
       let args: Record<string, unknown>;
       try {
         args = JSON.parse(tc.function.arguments);
       } catch {
-        messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: '{"error":"Invalid JSON in tool call arguments"}',
-        });
+        messages.push({ role: "tool", tool_call_id: tc.id, content: '{"error":"Invalid JSON"}' });
         continue;
       }
 
       try {
         const out = await executeTool(tc.function.name, args);
         if (out.attachment) attachment = out.attachment;
-
         let json = JSON.stringify(out.result);
         if (json.length > MAX_TOOL_RESULT_LENGTH) {
-          json =
-            json.slice(0, MAX_TOOL_RESULT_LENGTH) +
-            "\n...[truncated]";
+          json = json.slice(0, MAX_TOOL_RESULT_LENGTH) + "\n...[truncated]";
         }
-        console.log(`[AI] Tool OK: ${tc.function.name} (${json.length} chars)`);
+        console.log(`[AI] OK: ${tc.function.name} (${json.length} chars)`);
         messages.push({ role: "tool", tool_call_id: tc.id, content: json });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[AI] Tool ERROR: ${tc.function.name}:`, errMsg);
-        messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ error: errMsg }),
-        });
+        console.error(`[AI] ERROR: ${tc.function.name}:`, errMsg);
+        messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify({ error: errMsg }) });
       }
     }
   }

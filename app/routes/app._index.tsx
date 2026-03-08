@@ -8,7 +8,7 @@ import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { processChat, type ToolHandler, type HistoryMessage } from "../ai.server";
-import { exportToExcel, exportChart } from "../tools.server";
+import { exportToExcel, exportChart, type Resource } from "../tools.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 /* ── types ── */
@@ -63,11 +63,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (name === "export_to_excel") {
-      return exportToExcel(admin, args as Parameters<typeof exportToExcel>[1]);
+      return exportToExcel(admin, {
+        resource: args.resource as Resource,
+        title: args.title as string | undefined,
+        dateRange: args.dateRange as string | undefined,
+        queryFilter: args.queryFilter as string | undefined,
+        columns: args.columns as Array<{ header: string; key: string; width?: number }> | undefined,
+        rowFilters: args.rowFilters as Parameters<typeof exportToExcel>[1]["rowFilters"],
+        includeLineItems: args.includeLineItems as boolean | undefined,
+      });
     }
 
     if (name === "export_chart") {
-      return exportChart(admin, args as Parameters<typeof exportChart>[1]);
+      return exportChart(admin, {
+        resource: args.resource as Resource,
+        title: (args.title as string) ?? "图表",
+        chartType: args.chartType as string | undefined,
+        dateRange: args.dateRange as string | undefined,
+        queryFilter: args.queryFilter as string | undefined,
+        metric: (args.metric as "count" | "sales_amount" | "quantity") ?? "count",
+        groupBy: (args.groupBy as "month" | "product" | "customer" | "status" | "city" | "country") ?? "month",
+        valueLabel: args.valueLabel as string | undefined,
+      });
     }
 
     return { result: { error: `Unknown tool: ${name}` } };
