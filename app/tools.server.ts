@@ -3,6 +3,73 @@ import { ChartJSNodeCanvas } from "chartjs-node-canvas";
 import type { ChartConfiguration } from "chart.js";
 import type { Attachment } from "./ai.server";
 
+function flattenNode(obj: Record<string, unknown>): Record<string, unknown> {
+  const flat: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const inner = v as Record<string, unknown>;
+      if ("edges" in inner && Array.isArray(inner.edges)) {
+        const firstNode = (inner.edges as Array<{ node?: unknown }>)[0]?.node;
+        if (firstNode && typeof firstNode === "object") {
+          for (const [nk, nv] of Object.entries(
+            firstNode as Record<string, unknown>,
+          )) {
+            if (nv && typeof nv === "object" && "amount" in (nv as Record<string, unknown>)) {
+              flat[nk] = (nv as Record<string, unknown>).amount;
+            } else if (nv === null || typeof nv !== "object") {
+              flat[nk] = nv;
+            }
+          }
+        }
+      } else if ("amount" in inner) {
+        flat[k] = inner.amount;
+      } else {
+        for (const [nk, nv] of Object.entries(inner)) {
+          if (nv === null || typeof nv !== "object") flat[nk] = nv;
+        }
+      }
+    } else {
+      flat[k] = v;
+    }
+  }
+  return flat;
+}
+
+function normalizeRows(
+  raw: unknown,
+  columnKeys: string[],
+): Array<Record<string, unknown>> {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => {
+      if (item && typeof item === "object") {
+        const obj = item as Record<string, unknown>;
+        if ("node" in obj && typeof obj.node === "object" && obj.node) {
+          return flattenNode(obj.node as Record<string, unknown>);
+        }
+        return flattenNode(obj);
+      }
+      return { value: item };
+    });
+  }
+
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if ("edges" in obj && Array.isArray(obj.edges)) {
+      return normalizeRows(obj.edges, columnKeys);
+    }
+    if ("data" in obj && typeof obj.data === "object" && obj.data) {
+      const data = obj.data as Record<string, unknown>;
+      const firstKey = Object.keys(data)[0];
+      if (firstKey) return normalizeRows(data[firstKey], columnKeys);
+    }
+    const vals = Object.values(obj);
+    if (vals.length > 0 && vals.every((v) => typeof v === "object" && v))
+      return vals.map((v) => flattenNode(v as Record<string, unknown>));
+  }
+
+  return [];
+}
+
 function safeFilename(title: string): string {
   return title.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_").slice(0, 60);
 }
@@ -121,16 +188,7 @@ export async function generateExcel(args: {
 }): Promise<{ result: unknown; attachment: Attachment }> {
   const { title, columns } = args;
 
-  let rows: Array<Record<string, unknown>>;
-  if (Array.isArray(args.rows)) {
-    rows = args.rows;
-  } else if (args.rows && typeof args.rows === "object") {
-    rows = Object.values(args.rows as Record<string, unknown>).map((v) =>
-      typeof v === "object" && v !== null ? (v as Record<string, unknown>) : { value: v },
-    );
-  } else {
-    rows = [];
-  }
+  const rows = normalizeRows(args.rows, columns.map((c) => c.key));
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "AI Report Assistant";
