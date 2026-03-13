@@ -179,46 +179,46 @@ const QUERIES = {
 
 const DEFAULT_COLUMNS: Record<string, Array<{ header: string; key: string; width?: number }>> = {
   products: [
-    { header: "产品名称", key: "title", width: 30 },
-    { header: "状态", key: "status", width: 12 },
-    { header: "类型", key: "productType", width: 18 },
-    { header: "供应商", key: "vendor", width: 18 },
+    { header: "Product Name", key: "title", width: 30 },
+    { header: "Status", key: "status", width: 12 },
+    { header: "Type", key: "productType", width: 18 },
+    { header: "Vendor", key: "vendor", width: 18 },
     { header: "SKU", key: "sku", width: 18 },
-    { header: "价格", key: "price", width: 12 },
-    { header: "原价", key: "compareAtPrice", width: 12 },
-    { header: "库存", key: "inventoryQuantity", width: 10 },
-    { header: "创建时间", key: "createdAt", width: 22 },
+    { header: "Price", key: "price", width: 12 },
+    { header: "Compare At Price", key: "compareAtPrice", width: 12 },
+    { header: "Inventory", key: "inventoryQuantity", width: 10 },
+    { header: "Created At", key: "createdAt", width: 22 },
   ],
   orders: [
-    { header: "订单号", key: "name", width: 14 },
-    { header: "下单时间", key: "createdAt", width: 22 },
-    { header: "总金额", key: "totalPrice", width: 14 },
-    { header: "小计", key: "subtotal", width: 14 },
-    { header: "税费", key: "totalTax", width: 12 },
-    { header: "折扣", key: "totalDiscount", width: 12 },
-    { header: "付款状态", key: "displayFinancialStatus", width: 14 },
-    { header: "履约状态", key: "displayFulfillmentStatus", width: 14 },
-    { header: "客户", key: "customerName", width: 20 },
-    { header: "客户邮箱", key: "customerEmail", width: 25 },
-    { header: "城市", key: "city", width: 15 },
-    { header: "国家", key: "country", width: 15 },
+    { header: "Order #", key: "name", width: 14 },
+    { header: "Order Date", key: "createdAt", width: 22 },
+    { header: "Total", key: "totalPrice", width: 14 },
+    { header: "Subtotal", key: "subtotal", width: 14 },
+    { header: "Tax", key: "totalTax", width: 12 },
+    { header: "Discount", key: "totalDiscount", width: 12 },
+    { header: "Payment Status", key: "displayFinancialStatus", width: 14 },
+    { header: "Fulfillment Status", key: "displayFulfillmentStatus", width: 14 },
+    { header: "Customer", key: "customerName", width: 20 },
+    { header: "Customer Email", key: "customerEmail", width: 25 },
+    { header: "City", key: "city", width: 15 },
+    { header: "Country", key: "country", width: 15 },
   ],
   customers: [
-    { header: "姓名", key: "displayName", width: 20 },
-    { header: "邮箱", key: "email", width: 28 },
-    { header: "电话", key: "phone", width: 18 },
-    { header: "订单数", key: "ordersCount", width: 10 },
-    { header: "总消费", key: "totalSpent", width: 14 },
-    { header: "城市", key: "city", width: 15 },
-    { header: "省份", key: "province", width: 15 },
-    { header: "国家", key: "country", width: 15 },
-    { header: "注册时间", key: "createdAt", width: 22 },
+    { header: "Name", key: "displayName", width: 20 },
+    { header: "Email", key: "email", width: 28 },
+    { header: "Phone", key: "phone", width: 18 },
+    { header: "Orders", key: "ordersCount", width: 10 },
+    { header: "Total Spent", key: "totalSpent", width: 14 },
+    { header: "City", key: "city", width: 15 },
+    { header: "Province", key: "province", width: 15 },
+    { header: "Country", key: "country", width: 15 },
+    { header: "Registered At", key: "createdAt", width: 22 },
   ],
   collections: [
-    { header: "系列名称", key: "title", width: 30 },
+    { header: "Collection Name", key: "title", width: 30 },
     { header: "Handle", key: "handle", width: 25 },
-    { header: "产品数量", key: "productsCount", width: 12 },
-    { header: "更新时间", key: "updatedAt", width: 22 },
+    { header: "Product Count", key: "productsCount", width: 12 },
+    { header: "Updated At", key: "updatedAt", width: 22 },
   ],
 };
 
@@ -234,8 +234,8 @@ function flattenProductNode(node: Record<string, unknown>): Array<Record<string,
     handle: node.handle,
     productType: node.productType ?? "",
     vendor: node.vendor ?? "",
-    createdAt: node.createdAt ? new Date(String(node.createdAt)).toLocaleString("zh-CN") : "",
-    updatedAt: node.updatedAt ? new Date(String(node.updatedAt)).toLocaleString("zh-CN") : "",
+    createdAt: node.createdAt ? new Date(String(node.createdAt)).toLocaleString("en-US") : "",
+    updatedAt: node.updatedAt ? new Date(String(node.updatedAt)).toLocaleString("en-US") : "",
   };
   const variants = (node.variants as { edges?: Array<{ node: Record<string, unknown> }> })?.edges ?? [];
   if (variants.length === 0) {
@@ -261,7 +261,7 @@ function flattenOrderNode(node: Record<string, unknown>): Record<string, unknown
   return {
     id: node.id,
     name: node.name,
-    createdAt: node.createdAt ? new Date(String(node.createdAt)).toLocaleString("zh-CN") : "",
+    createdAt: node.createdAt ? new Date(String(node.createdAt)).toLocaleString("en-US") : "",
     totalPrice: money(node.totalPriceSet),
     subtotal: money(node.subtotalPriceSet),
     totalTax: money(node.totalTaxSet),
@@ -291,7 +291,7 @@ function flattenCustomerNode(node: Record<string, unknown>): Record<string, unkn
     city: addr?.city ?? "",
     province: addr?.province ?? "",
     country: addr?.country ?? "",
-    createdAt: node.createdAt ? new Date(String(node.createdAt)).toLocaleString("zh-CN") : "",
+    createdAt: node.createdAt ? new Date(String(node.createdAt)).toLocaleString("en-US") : "",
   };
 }
 
@@ -302,7 +302,7 @@ function flattenCollectionNode(node: Record<string, unknown>): Record<string, un
     title: node.title ?? "",
     handle: node.handle ?? "",
     productsCount: pc?.count ?? 0,
-    updatedAt: node.updatedAt ? new Date(String(node.updatedAt)).toLocaleString("zh-CN") : "",
+    updatedAt: node.updatedAt ? new Date(String(node.updatedAt)).toLocaleString("en-US") : "",
   };
 }
 
@@ -395,10 +395,10 @@ export async function exportToExcel(
     if (includeLineItems && resource === "orders") {
       columns = [
         ...columns,
-        { header: "商品", key: "itemTitle", width: 25 },
-        { header: "数量", key: "itemQuantity", width: 10 },
+        { header: "Item", key: "itemTitle", width: 25 },
+        { header: "Quantity", key: "itemQuantity", width: 10 },
         { header: "SKU", key: "itemSku", width: 15 },
-        { header: "商品金额", key: "itemTotal", width: 14 },
+        { header: "Item Total", key: "itemTotal", width: 14 },
       ];
     }
   }
@@ -438,7 +438,7 @@ export async function exportChart(
   const chartType = (
     args.chartType === "bar" ? "bar" : args.chartType === "pie" ? "pie" : "line"
   ) as "bar" | "pie" | "line";
-  const valueLabel = args.valueLabel ?? (metric === "sales_amount" ? "销售额" : metric === "quantity" ? "数量" : "数量");
+  const valueLabel = args.valueLabel ?? (metric === "sales_amount" ? "Sales Amount" : metric === "quantity" ? "Quantity" : "Count");
 
   const query = QUERIES[resource];
   if (!query) throw new Error(`Unsupported resource: ${resource}`);
@@ -470,9 +470,9 @@ export async function exportChart(
           break;
         }
         case "status": label = String(flat.displayFinancialStatus); break;
-        case "city": label = String(flat.city || "未知"); break;
-        case "country": label = String(flat.country || "未知"); break;
-        case "customer": label = String(flat.customerName || "未知"); break;
+        case "city": label = String(flat.city || "Unknown"); break;
+        case "country": label = String(flat.country || "Unknown"); break;
+        case "customer": label = String(flat.customerName || "Unknown"); break;
         default: label = String(flat.name);
       }
       value = metric === "sales_amount" ? Number(flat.totalPrice) || 0 : 1;
@@ -488,7 +488,7 @@ export async function exportChart(
         value = variants.reduce((s, v) => s + (Number(v.node.inventoryQuantity) || 0), 0);
       }
     } else if (resource === "customers") {
-      label = String(node.displayName || node.email || "未知");
+      label = String(node.displayName || node.email || "Unknown");
       const spent = node.totalSpent as { amount?: string } | undefined;
       value = metric === "sales_amount" ? Number(spent?.amount) || 0 : Number(node.ordersCount) || 0;
     } else {
@@ -547,7 +547,7 @@ export async function exportChart(
   workbook.creator = "AI Report Assistant";
   const sheet = workbook.addWorksheet(title);
   sheet.columns = [
-    { header: "类别", key: "label", width: 22 },
+    { header: "Category", key: "label", width: 22 },
     { header: valueLabel, key: "value", width: 18 },
   ];
   const hdr = sheet.getRow(1);

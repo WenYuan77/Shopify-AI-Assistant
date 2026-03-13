@@ -35,7 +35,7 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
             enum: ["products", "orders", "customers", "collections"],
             description: "Which data to export",
           },
-          title: { type: "string", description: "Excel title, e.g. '产品报告'" },
+          title: { type: "string", description: "Excel title, e.g. 'Product Report'" },
           dateRange: {
             type: "string",
             description: "For orders: date filter, e.g. 'created_at:>=2026-01-01 AND created_at:<2026-02-01'",
@@ -106,7 +106,7 @@ const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
             enum: ["month", "product", "customer", "status", "city", "country"],
             description: "How to group data on the chart",
           },
-          valueLabel: { type: "string", description: "Chart legend label, e.g. '订单数'" },
+          valueLabel: { type: "string", description: "Chart legend label, e.g. 'Order Count'" },
         },
         required: ["resource", "title", "chartType", "metric", "groupBy"],
       },
@@ -124,25 +124,25 @@ function buildSystemPrompt(): string {
       ? `${y - 1}-12`
       : `${y}-${String(now.getMonth()).padStart(2, "0")}`;
 
-  return `你是 Shopify 店铺的 AI 数据助手。你可以查询店铺数据、导出报表和生成图表。
+  return `You are an AI data assistant for a Shopify store. You can query store data, export reports, and generate charts.
 
-【当前日期】${y}-${m}-${d}  今年=${y} 去年=${y - 1} 本月=${y}-${m} 上个月=${prevMonth}
+[Current Date] ${y}-${m}-${d}  This year=${y} Last year=${y - 1} This month=${y}-${m} Last month=${prevMonth}
 
-【Shopify GraphQL 参考】
-产品: query($first:Int!){products(first:$first,sortKey:TITLE){edges{node{id title status variants(first:10){edges{node{sku price inventoryQuantity}}}}}pageInfo{hasNextPage endCursor}}}
-订单: query($first:Int!,$query:String){orders(first:$first,query:$query,sortKey:CREATED_AT,reverse:true){edges{node{id name createdAt totalPriceSet{shopMoney{amount currencyCode}} lineItems(first:50){edges{node{title quantity}}} customer{displayName email}}}pageInfo{hasNextPage endCursor}}}
-客户: query($first:Int!){customers(first:$first){edges{node{id displayName email ordersCount totalSpent{amount currencyCode}}}}}
-计数: query{productsCount{count} ordersCount{count} customersCount{count}}
-日期过滤: query:"created_at:>=${y}-01-01 AND created_at:<${y}-02-01 status:any"
+[Shopify GraphQL Reference]
+Products: query($first:Int!){products(first:$first,sortKey:TITLE){edges{node{id title status variants(first:10){edges{node{sku price inventoryQuantity}}}}}pageInfo{hasNextPage endCursor}}}
+Orders: query($first:Int!,$query:String){orders(first:$first,query:$query,sortKey:CREATED_AT,reverse:true){edges{node{id name createdAt totalPriceSet{shopMoney{amount currencyCode}} lineItems(first:50){edges{node{title quantity}}} customer{displayName email}}}pageInfo{hasNextPage endCursor}}}
+Customers: query($first:Int!){customers(first:$first){edges{node{id displayName email ordersCount totalSpent{amount currencyCode}}}}}
+Counts: query{productsCount{count} ordersCount{count} customersCount{count}}
+Date filter: query:"created_at:>=${y}-01-01 AND created_at:<${y}-02-01 status:any"
 
-【工具使用规则】
-1. 用户问数据问题 → run_shopify_query → 用中文总结
-2. 用户要导出/下载 → export_to_excel（指定 resource + 可选 filters/columns）
-3. 用户要图表 → export_chart（指定 resource + metric + groupBy）
-4. Shopify API 不支持按库存/价格过滤 → 用 rowFilters 在后端过滤
-5. 只用 query，禁止 mutation。$first 默认 250。
-6. 与店铺无关的问题礼貌拒绝。用中文回复。
-7. 不要在 export_to_excel 或 export_chart 中尝试自己写 GraphQL，这些工具后端会自动处理。`;
+[Tool Usage Rules]
+1. User asks a data question → run_shopify_query → summarize the results in English
+2. User wants to export/download → export_to_excel (specify resource + optional filters/columns)
+3. User wants a chart → export_chart (specify resource + metric + groupBy)
+4. Shopify API does not support filtering by inventory/price → use rowFilters for backend filtering
+5. Only use queries, never mutations. Default $first to 250.
+6. Politely decline questions unrelated to the store. Reply in English.
+7. Do not write your own GraphQL in export_to_excel or export_chart — these tools handle queries automatically on the backend.`;
 }
 
 export interface Attachment {
@@ -172,7 +172,7 @@ export async function processChat(
   history: HistoryMessage[] = [],
 ): Promise<ChatResult> {
   if (!apiKey) {
-    return { content: "请先在环境变量中配置 OPENAI_API_KEY 以启用智能解析。" };
+    return { content: "Please configure OPENAI_API_KEY in your environment variables to enable AI features." };
   }
 
   const openai = new OpenAI({ apiKey });
@@ -194,7 +194,7 @@ export async function processChat(
     });
 
     const choice = completion.choices[0];
-    if (!choice) return { content: "AI 未返回有效响应，请重试。" };
+    if (!choice) return { content: "AI did not return a valid response. Please try again." };
 
     const msg = choice.message;
     messages.push(msg);
@@ -233,5 +233,5 @@ export async function processChat(
     }
   }
 
-  return { content: "处理步骤超过限制，请简化您的请求后重试。", attachment };
+  return { content: "Processing steps exceeded the limit. Please simplify your request and try again.", attachment };
 }

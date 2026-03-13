@@ -31,7 +31,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const prompt = formData.get("prompt");
   if (typeof prompt !== "string" || !prompt.trim()) {
-    return { content: "请输入您的问题。" };
+    return { content: "Please enter your question." };
   }
 
   let history: HistoryMessage[] = [];
@@ -77,7 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (name === "export_chart") {
       return exportChart(admin, {
         resource: args.resource as Resource,
-        title: (args.title as string) ?? "图表",
+        title: (args.title as string) ?? "Chart",
         chartType: args.chartType as string | undefined,
         dateRange: args.dateRange as string | undefined,
         queryFilter: args.queryFilter as string | undefined,
@@ -99,7 +99,7 @@ const WELCOME: ChatMessage = {
   id: "welcome",
   role: "assistant",
   content:
-    "你好！我是 AI 报告助手 👋\n\n我可以直接查询你的店铺数据，并生成报表和图表。试试这样问我：\n\n• 我的店铺有多少产品和订单？\n• 帮我查上个月每款产品的销量\n• 把订单数据导出成 Excel\n• 生成今年每月销售额的柱状图",
+    "Hi! I'm your AI Report Assistant 👋\n\nI can query your store data directly and generate reports and charts. Try asking me:\n\n• How many products and orders does my store have?\n• Show me last month's sales by product\n• Export order data to Excel\n• Generate a monthly sales bar chart for this year",
 };
 
 export default function Index() {
@@ -171,7 +171,7 @@ export default function Index() {
     a.download = att.filename;
     a.click();
     URL.revokeObjectURL(a.href);
-    shopify.toast.show("文件已下载");
+    shopify.toast.show("File downloaded");
   };
 
   return (
@@ -204,7 +204,7 @@ export default function Index() {
                   style={st.dlBtn}
                   onClick={() => download(m.attachment!)}
                 >
-                  📥 下载 {m.attachment.filename}
+                  📥 Download {m.attachment.filename}
                 </button>
               )}
             </div>
@@ -222,7 +222,7 @@ export default function Index() {
           >
             <div style={st.label}>AI Assistant</div>
             <div style={{ ...st.bubble, ...st.aiBubble, color: "#6b7280" }}>
-              正在查询数据并分析中...
+              Querying data and analyzing...
             </div>
           </div>
         )}
